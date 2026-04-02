@@ -1,0 +1,91 @@
+name: Security
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: "Node.js version to use"
+        required: false
+        type: string
+        default: "20"
+      package-manager:
+        description: "Package manager (npm, yarn, pnpm)"
+        required: false
+        type: string
+        default: "npm"
+      audit-level:
+        description: "npm audit severity threshold (low, moderate, high, critical)"
+        required: false
+        type: string
+        default: "high"
+      skip-gitleaks:
+        description: "Skip secret leak scanning"
+        required: false
+        type: boolean
+        default: false
+      skip-audit:
+        description: "Skip npm audit"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  supply-chain:
+    name: Supply Chain Protection
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Setup Socket Firewall
+        uses: socketdev/action@ba6de6cc0565af1f42295590380973573297e31f
+        with:
+          mode: firewall-free
+
+      - name: Install dependencies (npm)
+        if: inputs.package-manager == 'npm'
+        run: sfw npm ci
+
+      - name: Install dependencies (yarn)
+        if: inputs.package-manager == 'yarn'
+        run: sfw yarn install --frozen-lockfile
+
+      - name: Install dependencies (pnpm)
+        if: inputs.package-manager == 'pnpm'
+        run: |
+          npm i -g pnpm
+          sfw pnpm install --frozen-lockfile
+
+  audit:
+    name: Dependency Audit
+    if: ${{ !inputs.skip-audit }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit
+        run: npm audit --audit-level=${{ inputs.audit-level }}
+
+  secrets:
+    name: Secret Leak Detection
+    if: ${{ !inputs.skip-gitleaks }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
